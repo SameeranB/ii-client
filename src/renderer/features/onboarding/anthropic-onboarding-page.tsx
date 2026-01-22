@@ -56,10 +56,16 @@ export function AnthropicOnboardingPage() {
 
     try {
       await startLocalAuthMutation.mutateAsync()
-      setFlowState({ step: "success" })
-      // Small delay for visual feedback, then complete onboarding
-      setTimeout(() => setAnthropicOnboardingCompleted(true), 500)
+      // Only advance to success if still in authenticating state (not canceled)
+      if (flowState.step === "authenticating") {
+        setFlowState({ step: "success" })
+        // Small delay for visual feedback, then complete onboarding
+        setTimeout(() => setAnthropicOnboardingCompleted(true), 500)
+      }
     } catch (error) {
+      // Ignore errors if user has canceled (state is no longer "authenticating")
+      if (flowState.step !== "authenticating") return
+
       const message = error instanceof Error ? error.message : "Authentication failed"
       // Check if error is recoverable (user can retry)
       const recoverable = !message.includes("unexpected") && !message.includes("internal")

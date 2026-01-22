@@ -384,6 +384,13 @@ export async function startOAuthFlow(
         timeoutId: null,
       }
 
+      // Handle server errors
+      server.on("error", (err) => {
+        console.error("[OAuth] Server error:", err)
+        cleanup()
+        reject(new Error(`Failed to start OAuth server: ${err.message}`))
+      })
+
       // Start server
       server.listen(port, "127.0.0.1", () => {
         console.log(`[OAuth] Server listening on http://localhost:${port}`)
