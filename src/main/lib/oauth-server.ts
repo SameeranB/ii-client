@@ -16,8 +16,8 @@ import crypto from "crypto"
 const OAUTH_CONFIG = {
   // Console.anthropic.com OAuth endpoint
   authorizationEndpoint: "https://console.anthropic.com/oauth/authorize",
-  // Token exchange endpoint
-  tokenEndpoint: "https://console.anthropic.com/v1/oauth/token",
+  // Token exchange endpoint (uses /api/oauth/token not /v1/oauth/token)
+  tokenEndpoint: "https://console.anthropic.com/api/oauth/token",
   // Client ID used by Claude Desktop/CLI
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   // Scopes for inference access
@@ -272,25 +272,25 @@ async function exchangeCodeForTokens(code: string): Promise<OAuthResult> {
 
   const redirectUri = `http://localhost:${oauthState.port}/callback`
 
-  // Use URLSearchParams for application/x-www-form-urlencoded format
-  const params = new URLSearchParams({
+  // Anthropic's token endpoint expects JSON format
+  const body = {
     grant_type: "authorization_code",
     code,
     client_id: OAUTH_CONFIG.clientId,
     redirect_uri: redirectUri,
     code_verifier: oauthState.pkce.verifier,
-  })
+  }
 
   console.log("[OAuth] Exchanging code for tokens...")
   console.log("[OAuth] Token endpoint:", OAUTH_CONFIG.tokenEndpoint)
-  console.log("[OAuth] Request params:", params.toString())
+  console.log("[OAuth] Request body:", JSON.stringify(body, null, 2))
 
   const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
     method: "POST",
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
     },
-    body: params.toString(),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
