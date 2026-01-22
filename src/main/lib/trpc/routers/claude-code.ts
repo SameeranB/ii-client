@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm"
 import { safeStorage } from "electron"
 import { z } from "zod"
-import { getExistingClaudeToken } from "../../claude-token"
+import { getExistingClaudeToken, runClaudeSetupToken, isClaudeCliInstalled } from "../../claude-token"
 import { claudeCodeCredentials, getDatabase } from "../../db"
 import { startOAuthFlow, cancelOAuthFlow, isOAuthFlowInProgress } from "../../oauth-server"
 import { publicProcedure, router } from "../index"
@@ -149,6 +149,37 @@ export const claudeCodeRouter = router({
 
     storeOAuthToken(token)
     console.log("[ClaudeCode] Token imported from system")
+    return { success: true }
+  }),
+
+  /**
+   * Check if Claude CLI is installed
+   */
+  isClaudeCliInstalled: publicProcedure.query(() => {
+    return { installed: isClaudeCliInstalled() }
+  }),
+
+  /**
+   * Run Claude CLI setup-token to authenticate
+   */
+  setupTokenWithCli: publicProcedure.mutation(async () => {
+    if (!isClaudeCliInstalled()) {
+      throw new Error("Claude CLI is not installed. Please install it from https://claude.ai/code")
+    }
+
+    const result = await runClaudeSetupToken((message) => {
+      console.log("[ClaudeCode] Setup:", message)
+    })
+
+    if (!result.success) {
+      throw new Error(result.error || "Failed to setup token with Claude CLI")
+    }
+
+    if (result.token) {
+      storeOAuthToken(result.token)
+      console.log("[ClaudeCode] Token stored from Claude CLI")
+    }
+
     return { success: true }
   }),
 

@@ -15,6 +15,7 @@ import { trpc } from "../../lib/trpc"
 type AuthFlowState =
   | { step: "idle" }
   | { step: "authenticating" }
+  | { step: "cli-setup" }
   | { step: "success" }
   | { step: "error"; message: string; recoverable: boolean }
 
@@ -41,7 +42,9 @@ export function AnthropicOnboardingPage() {
   const startLocalAuthMutation = trpc.claudeCode.startLocalAuth.useMutation()
   const cancelLocalAuthMutation = trpc.claudeCode.cancelLocalAuth.useMutation()
   const importSystemTokenMutation = trpc.claudeCode.importSystemToken.useMutation()
+  const setupTokenWithCliMutation = trpc.claudeCode.setupTokenWithCli.useMutation()
   const existingTokenQuery = trpc.claudeCode.getSystemToken.useQuery()
+  const cliInstalledQuery = trpc.claudeCode.isClaudeCliInstalled.useQuery()
 
   const existingToken = existingTokenQuery.data?.token ?? null
   const hasExistingToken = !!existingToken
@@ -100,7 +103,27 @@ export function AnthropicOnboardingPage() {
     setExistingTokenError(null)
   }
 
+  const handleSetupWithCli = async () => {
+    if (flowState.step === "cli-setup") return
+
+    setFlowState({ step: "cli-setup" })
+
+    try {
+      await setupTokenWithCliMutation.mutateAsync()
+      setFlowState({ step: "success" })
+      setTimeout(() => setAnthropicOnboardingCompleted(true), 500)
+    } catch (error) {
+      if (flowState.step !== "cli-setup") return
+
+      const message = error instanceof Error ? error.message : "CLI setup failed"
+      const recoverable = !message.includes("not installed")
+      setFlowState({ step: "error", message, recoverable })
+    }
+  }
+
   const isAuthenticating = flowState.step === "authenticating"
+  const isCliSetup = flowState.step === "cli-setup"
+  const isClaudeCliInstalled = cliInstalledQuery.data?.installed ?? false
 
   return (
     <div className="h-screen w-screen flex flex-col items-center justify-center bg-background select-none">
@@ -184,16 +207,53 @@ export function AnthropicOnboardingPage() {
             </div>
           )}
 
-          {/* Connect Button - Idle state */}
+          {/* Auth Options - Idle state */}
           {checkedExistingToken &&
             !shouldOfferExistingToken &&
             flowState.step === "idle" && (
-              <button
-                onClick={handleConnect}
-                className="h-8 px-4 min-w-[85px] bg-primary text-primary-foreground rounded-lg text-sm font-medium transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] dark:shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] flex items-center justify-center"
-              >
-                Connect
-              </button>
+              <div className="w-full space-y-3">
+                {/* Primary: Import from Claude CLI (if installed) */}
+                {isClaudeCliInstalled && (
+                  <button
+                    onClick={handleSetupWithCli}
+                    className="w-full h-9 px-4 bg-primary text-primary-foreground rounded-lg text-sm font-medium transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] dark:shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] flex items-center justify-center"
+                  >
+                    Import from Claude CLI
+                  </button>
+                )}
+
+                {/* Secondary: OAuth (only show if CLI not installed) */}
+                {!isClaudeCliInstalled && (
+                  <button
+                    onClick={handleConnect}
+                    className="w-full h-9 px-4 bg-primary text-primary-foreground rounded-lg text-sm font-medium transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] dark:shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] flex items-center justify-center"
+                  >
+                    Connect with OAuth
+                  </button>
+                )}
+
+                {/* Divider */}
+                {isClaudeCliInstalled && (
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-border"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">Or</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tertiary: OAuth (if CLI is installed) */}
+                {isClaudeCliInstalled && (
+                  <button
+                    onClick={handleConnect}
+                    className="w-full h-8 px-4 bg-muted text-foreground rounded-lg text-sm font-medium transition-[background-color,transform] duration-150 hover:bg-muted/80 active:scale-[0.97] flex items-center justify-center"
+                  >
+                    Connect with OAuth
+                  </button>
+                )}
+              </div>
             )}
 
           {/* Authenticating state */}
@@ -214,6 +274,21 @@ export function AnthropicOnboardingPage() {
               >
                 Cancel
               </button>
+            </div>
+          )}
+
+          {/* CLI Setup state */}
+          {isCliSetup && (
+            <div className="space-y-4 text-center">
+              <div className="flex justify-center">
+                <IconSpinner className="h-8 w-8" />
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Setting up with Claude CLI...</p>
+                <p className="text-xs text-muted-foreground">
+                  A browser window has opened. Please complete authentication there.
+                </p>
+              </div>
             </div>
           )}
 
