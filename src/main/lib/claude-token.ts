@@ -2,6 +2,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { refreshOAuthToken, isTokenExpired as checkTokenExpired } from "./oauth-utils";
 
 interface ClaudeCredentials {
   claudeAiOauth?: {
@@ -189,55 +190,22 @@ export function getExistingClaudeToken(): string | null {
 
 /**
  * Refresh Claude OAuth token using refresh token
- * Uses the Anthropic API token endpoint
+ * Delegates to shared oauth-utils.ts implementation
  */
 export async function refreshClaudeToken(refreshToken: string): Promise<{
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;
 }> {
-  const params = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: 'claude-desktop',
-  });
-
-  const response = await fetch('https://api.anthropic.com/v1/oauth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to refresh Claude token: ${error}`);
-  }
-
-  const data = await response.json() as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in?: number;
-    token_type?: string;
-  };
-
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token || refreshToken,
-    expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
-  };
+  return refreshOAuthToken(refreshToken);
 }
 
 /**
  * Check if a token is expired or will expire soon (within 5 minutes)
+ * Delegates to shared oauth-utils.ts implementation
  */
 export function isTokenExpired(expiresAt?: number): boolean {
-  if (!expiresAt) {
-    // If no expiry, assume token is still valid
-    return false;
-  }
-  // Consider expired if less than 5 minutes remaining
-  const bufferMs = 5 * 60 * 1000;
-  return Date.now() + bufferMs >= expiresAt;
+  return checkTokenExpired(expiresAt);
 }
 
 /**

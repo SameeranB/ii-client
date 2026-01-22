@@ -11,17 +11,16 @@ import { createServer, Server, IncomingMessage, ServerResponse } from "http"
 import { URL } from "url"
 import { shell } from "electron"
 import crypto from "crypto"
+import {
+  OAUTH_ENDPOINTS,
+  OAUTH_CLIENT_ID,
+  OAUTH_SCOPES,
+  exchangeAuthorizationCode,
+  type OAuthTokens,
+} from "./oauth-utils"
 
-// OAuth Configuration - uses same client ID as Claude Desktop
+// OAuth Configuration
 const OAUTH_CONFIG = {
-  // Console.anthropic.com OAuth endpoint (redirects to platform.claude.com)
-  authorizationEndpoint: "https://console.anthropic.com/oauth/authorize",
-  // Token exchange endpoint - uses api.anthropic.com
-  tokenEndpoint: "https://api.anthropic.com/v1/oauth/token",
-  // Client ID used by Claude Desktop/CLI
-  clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-  // Scopes for inference access
-  scopes: "org:create_api_key user:profile user:inference",
   // Port range to try (avoids common dev ports)
   portRange: { min: 21300, max: 21399 },
 }
@@ -31,11 +30,8 @@ interface PKCEChallenge {
   challenge: string
 }
 
-export interface OAuthResult {
-  accessToken: string
-  refreshToken?: string
-  expiresAt?: number
-}
+// Re-export OAuthTokens as OAuthResult for backwards compatibility
+export type OAuthResult = OAuthTokens
 
 interface OAuthState {
   server: Server | null
@@ -264,6 +260,7 @@ async function handleCallback(
 
 /**
  * Exchange authorization code for tokens
+ * Delegates to shared oauth-utils.ts implementation
  */
 async function exchangeCodeForTokens(code: string): Promise<OAuthResult> {
   if (!oauthState.pkce || !oauthState.port) {
@@ -272,48 +269,14 @@ async function exchangeCodeForTokens(code: string): Promise<OAuthResult> {
 
   const redirectUri = `http://localhost:${oauthState.port}/callback`
 
-  // Use URLSearchParams for application/x-www-form-urlencoded format
-  // This matches the format used by claude-token.ts refreshClaudeToken()
-  const params = new URLSearchParams({
-    grant_type: "authorization_code",
+  const tokens = await exchangeAuthorizationCode({
     code,
-    client_id: OAUTH_CONFIG.clientId,
-    redirect_uri: redirectUri,
-    code_verifier: oauthState.pkce.verifier,
+    redirectUri,
+    codeVerifier: oauthState.pkce.verifier,
   })
-
-  console.log("[OAuth] Exchanging code for tokens...")
-  console.log("[OAuth] Token endpoint:", OAUTH_CONFIG.tokenEndpoint)
-  console.log("[OAuth] Request params:", params.toString())
-
-  const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error("[OAuth] Token exchange failed:", response.status, errorText)
-    throw new Error(`Token exchange failed: ${response.status} - ${errorText}`)
-  }
-
-  const data = (await response.json()) as {
-    access_token: string
-    refresh_token?: string
-    expires_in?: number
-    token_type?: string
-  }
 
   console.log("[OAuth] Token exchange successful")
-
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
-  }
+  return tokens
 }
 
 /**
@@ -429,11 +392,11 @@ export async function startOAuthFlow(
 
       // Build authorization URL
       const redirectUri = `http://localhost:${port}/callback`
-      const authUrl = new URL(OAUTH_CONFIG.authorizationEndpoint)
-      authUrl.searchParams.set("client_id", OAUTH_CONFIG.clientId)
+      const authUrl = new URL(OAUTH_ENDPOINTS.authorization)
+      authUrl.searchParams.set("client_id", OAUTH_CLIENT_ID)
       authUrl.searchParams.set("response_type", "code")
       authUrl.searchParams.set("redirect_uri", redirectUri)
-      authUrl.searchParams.set("scope", OAUTH_CONFIG.scopes)
+      authUrl.searchParams.set("scope", OAUTH_SCOPES)
       authUrl.searchParams.set("state", state)
       authUrl.searchParams.set("code_challenge", pkce.challenge)
       authUrl.searchParams.set("code_challenge_method", "S256")
