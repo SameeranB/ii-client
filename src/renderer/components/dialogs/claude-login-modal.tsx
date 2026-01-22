@@ -24,6 +24,7 @@ import { Logo } from "../ui/logo"
 type AuthFlowState =
   | { step: "idle" }
   | { step: "authenticating" }
+  | { step: "cli-setup" }
   | { step: "success" }
   | { step: "error"; message: string; recoverable: boolean }
 
@@ -36,6 +37,8 @@ export function ClaudeLoginModal() {
   // tRPC mutations
   const startLocalAuthMutation = trpc.claudeCode.startLocalAuth.useMutation()
   const cancelLocalAuthMutation = trpc.claudeCode.cancelLocalAuth.useMutation()
+  const setupTokenWithCliMutation = trpc.claudeCode.setupTokenWithCli.useMutation()
+  const cliInstalledQuery = trpc.claudeCode.isClaudeCliInstalled.useQuery()
 
   // Reset state when modal closes
   useEffect(() => {
@@ -85,6 +88,25 @@ export function ClaudeLoginModal() {
     setFlowState({ step: "idle" })
   }
 
+  const handleSetupWithCli = async () => {
+    if (flowState.step === "cli-setup") return
+
+    setFlowState({ step: "cli-setup" })
+
+    try {
+      await setupTokenWithCliMutation.mutateAsync()
+      setFlowState({ step: "success" })
+      triggerAuthRetry()
+      setTimeout(() => setOpen(false), 500)
+    } catch (error) {
+      if (flowState.step !== "cli-setup") return
+
+      const message = error instanceof Error ? error.message : "CLI setup failed"
+      const recoverable = !message.includes("not installed")
+      setFlowState({ step: "error", message, recoverable })
+    }
+  }
+
   const handleOpenModelsSettings = () => {
     clearPendingRetry()
     setSettingsActiveTab("models" as SettingsTab)
@@ -101,6 +123,8 @@ export function ClaudeLoginModal() {
   }
 
   const isAuthenticating = flowState.step === "authenticating"
+  const isCliSetup = flowState.step === "cli-setup"
+  const isClaudeCliInstalled = cliInstalledQuery.data?.installed ?? false
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
@@ -134,11 +158,42 @@ export function ClaudeLoginModal() {
 
           {/* Content */}
           <div className="space-y-6">
-            {/* Connect Button - Idle state */}
+            {/* Auth Options - Idle state */}
             {flowState.step === "idle" && (
-              <Button onClick={handleConnect} className="w-full">
-                Connect
-              </Button>
+              <div className="w-full space-y-3">
+                {/* Primary: Import from Claude CLI (if installed) */}
+                {isClaudeCliInstalled && (
+                  <Button onClick={handleSetupWithCli} className="w-full">
+                    Import from Claude CLI
+                  </Button>
+                )}
+
+                {/* Secondary: OAuth (only show if CLI not installed) */}
+                {!isClaudeCliInstalled && (
+                  <Button onClick={handleConnect} className="w-full">
+                    Connect with OAuth
+                  </Button>
+                )}
+
+                {/* Divider */}
+                {isClaudeCliInstalled && (
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-border"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">Or</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tertiary: OAuth (if CLI is installed) */}
+                {isClaudeCliInstalled && (
+                  <Button variant="secondary" onClick={handleConnect} className="w-full">
+                    Connect with OAuth
+                  </Button>
+                )}
+              </div>
             )}
 
             {/* Authenticating state */}
@@ -156,6 +211,21 @@ export function ClaudeLoginModal() {
                 <Button variant="secondary" onClick={handleCancel} className="w-full">
                   Cancel
                 </Button>
+              </div>
+            )}
+
+            {/* CLI Setup state */}
+            {isCliSetup && (
+              <div className="space-y-4 text-center">
+                <div className="flex justify-center">
+                  <IconSpinner className="h-8 w-8" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Setting up with Claude CLI...</p>
+                  <p className="text-xs text-muted-foreground">
+                    A browser window has opened. Please complete authentication there.
+                  </p>
+                </div>
               </div>
             )}
 

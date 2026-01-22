@@ -10,6 +10,7 @@ import { toast } from "sonner"
 type AuthFlowState =
   | { step: "idle" }
   | { step: "authenticating" }
+  | { step: "cli-setup" }
   | { step: "success" }
   | { step: "error"; message: string; recoverable: boolean }
 
@@ -25,6 +26,9 @@ export function AgentsClaudeCodeTab() {
     error,
     refetch,
   } = trpc.claudeCode.getIntegration.useQuery()
+
+  // Query CLI installation status
+  const cliInstalledQuery = trpc.claudeCode.isClaudeCliInstalled.useQuery()
 
   // Start local auth mutation
   const startLocalAuth = trpc.claudeCode.startLocalAuth.useMutation({
@@ -46,6 +50,23 @@ export function AgentsClaudeCodeTab() {
 
   // Cancel local auth mutation
   const cancelLocalAuth = trpc.claudeCode.cancelLocalAuth.useMutation()
+
+  // Setup with CLI mutation
+  const setupTokenWithCli = trpc.claudeCode.setupTokenWithCli.useMutation({
+    onSuccess: () => {
+      setFlowState({ step: "success" })
+      toast.success("Claude Code connected successfully!")
+      refetch()
+      utils.claudeCode.getIntegration.invalidate()
+      setTimeout(() => setFlowState({ step: "idle" }), 1500)
+    },
+    onError: (error) => {
+      const message = error.message || "Failed to setup with CLI"
+      const recoverable = !message.includes("not installed")
+      setFlowState({ step: "error", message, recoverable })
+      toast.error(message)
+    },
+  })
 
   // Disconnect mutation
   const disconnect = trpc.claudeCode.disconnect.useMutation({
@@ -72,6 +93,13 @@ export function AgentsClaudeCodeTab() {
   const handleDisconnect = () => {
     disconnect.mutate()
   }
+
+  const handleSetupWithCli = () => {
+    setFlowState({ step: "cli-setup" })
+    setupTokenWithCli.mutate()
+  }
+
+  const isClaudeCliInstalled = cliInstalledQuery.data?.installed ?? false
 
   if (isLoading) {
     return (
@@ -156,7 +184,40 @@ export function AgentsClaudeCodeTab() {
                   <p className="text-sm text-muted-foreground">Not connected</p>
                 </div>
 
-                <Button onClick={handleStartAuth}>Connect Claude Code</Button>
+                <div className="space-y-2">
+                  {/* Primary: Import from Claude CLI (if installed) */}
+                  {isClaudeCliInstalled && (
+                    <Button onClick={handleSetupWithCli} className="w-full">
+                      Import from Claude CLI
+                    </Button>
+                  )}
+
+                  {/* Secondary: OAuth (only show if CLI not installed) */}
+                  {!isClaudeCliInstalled && (
+                    <Button onClick={handleStartAuth} className="w-full">
+                      Connect with OAuth
+                    </Button>
+                  )}
+
+                  {/* Divider */}
+                  {isClaudeCliInstalled && (
+                    <div className="relative py-2">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-border"></div>
+                      </div>
+                      <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-background px-2 text-muted-foreground">Or</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tertiary: OAuth (if CLI is installed) */}
+                  {isClaudeCliInstalled && (
+                    <Button variant="outline" onClick={handleStartAuth} className="w-full">
+                      Connect with OAuth
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -177,6 +238,23 @@ export function AgentsClaudeCodeTab() {
                 <Button variant="outline" onClick={handleCancel}>
                   Cancel
                 </Button>
+              </div>
+            )}
+
+            {/* CLI Setup State */}
+            {flowState.step === "cli-setup" && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <IconSpinner className="h-5 w-5" />
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      Setting up with Claude CLI...
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      A browser window has opened. Please complete authentication there.
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
 
