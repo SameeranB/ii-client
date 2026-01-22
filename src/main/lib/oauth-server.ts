@@ -14,14 +14,14 @@ import crypto from "crypto"
 
 // OAuth Configuration - uses same client ID as Claude Desktop
 const OAUTH_CONFIG = {
-  // Claude.ai OAuth endpoint
-  authorizationEndpoint: "https://claude.ai/oauth/authorize",
+  // Console.anthropic.com OAuth endpoint
+  authorizationEndpoint: "https://console.anthropic.com/oauth/authorize",
   // Token exchange endpoint
   tokenEndpoint: "https://console.anthropic.com/v1/oauth/token",
   // Client ID used by Claude Desktop/CLI
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   // Scopes for inference access
-  scopes: "user:profile user:inference",
+  scopes: "org:create_api_key user:profile user:inference",
   // Port range to try (avoids common dev ports)
   portRange: { min: 21300, max: 21399 },
 }
