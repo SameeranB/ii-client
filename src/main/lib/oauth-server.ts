@@ -14,10 +14,10 @@ import crypto from "crypto"
 
 // OAuth Configuration - uses same client ID as Claude Desktop
 const OAUTH_CONFIG = {
-  // Console.anthropic.com OAuth endpoint
+  // Console.anthropic.com OAuth endpoint (redirects to platform.claude.com)
   authorizationEndpoint: "https://console.anthropic.com/oauth/authorize",
-  // Token exchange endpoint (uses /api/oauth/token not /v1/oauth/token)
-  tokenEndpoint: "https://console.anthropic.com/api/oauth/token",
+  // Token exchange endpoint - uses api.anthropic.com
+  tokenEndpoint: "https://api.anthropic.com/v1/oauth/token",
   // Client ID used by Claude Desktop/CLI
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   // Scopes for inference access
@@ -272,25 +272,26 @@ async function exchangeCodeForTokens(code: string): Promise<OAuthResult> {
 
   const redirectUri = `http://localhost:${oauthState.port}/callback`
 
-  // Anthropic's token endpoint expects JSON format
-  const body = {
+  // Use URLSearchParams for application/x-www-form-urlencoded format
+  // This matches the format used by claude-token.ts refreshClaudeToken()
+  const params = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     client_id: OAUTH_CONFIG.clientId,
     redirect_uri: redirectUri,
     code_verifier: oauthState.pkce.verifier,
-  }
+  })
 
   console.log("[OAuth] Exchanging code for tokens...")
   console.log("[OAuth] Token endpoint:", OAUTH_CONFIG.tokenEndpoint)
-  console.log("[OAuth] Request body:", JSON.stringify(body, null, 2))
+  console.log("[OAuth] Request params:", params.toString())
 
   const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: JSON.stringify(body),
+    body: params.toString(),
   })
 
   if (!response.ok) {
