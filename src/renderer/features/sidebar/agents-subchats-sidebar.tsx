@@ -38,6 +38,7 @@ import { useShallow } from "zustand/react/shallow"
 import {
   PlusIcon,
   ArchiveIcon,
+  BranchIcon,
   IconDoubleChevronLeft,
   IconSpinner,
   LoadingDot,
@@ -240,6 +241,34 @@ export function AgentsSubChatsSidebar({
       }
     },
   })
+
+  // Fork sub-chat mutation
+  const forkSubChatMutation = trpc.chats.forkSubChat.useMutation({
+    onSuccess: (forkedSubChat) => {
+      // Add to store
+      useAgentSubChatStore.getState().addToAllSubChats({
+        id: forkedSubChat.id,
+        name: forkedSubChat.name || undefined,
+        created_at: forkedSubChat.createdAt.toISOString(),
+        updated_at: forkedSubChat.updatedAt.toISOString(),
+        mode: forkedSubChat.mode,
+      })
+
+      // Open and switch to fork
+      useAgentSubChatStore.getState().addToOpenSubChats(forkedSubChat.id)
+      useAgentSubChatStore.getState().setActiveSubChat(forkedSubChat.id)
+
+      // Animation
+      setJustCreatedIds((prev) => new Set([...prev, forkedSubChat.id]))
+
+      // Toast
+      toast.success(`Forked to "${forkedSubChat.name}"`)
+    },
+    onError: (error) => {
+      toast.error(`Failed to fork: ${error.message}`)
+    },
+  })
+
   const subChatUnseenChanges = useAtomValue(agentsSubChatUnseenChangesAtom)
   const setSubChatUnseenChanges = useSetAtom(agentsSubChatUnseenChangesAtom)
   const [justCreatedIds, setJustCreatedIds] = useAtom(justCreatedIdsAtom)
@@ -520,6 +549,19 @@ export function AgentsSubChatsSidebar({
       }
     },
     [openSubChats.length, allSubChats, parentChatId, setUndoStack],
+  )
+
+  const handleForkSubChat = useCallback(
+    (subChatId: string) => {
+      const subChat = allSubChats.find((sc) => sc.id === subChatId)
+      const baseName = subChat?.name || "Chat"
+
+      forkSubChatMutation.mutate({
+        subChatId,
+        name: `${baseName} (fork)`,
+      })
+    },
+    [allSubChats, forkSubChatMutation],
   )
 
   const handleConfirmArchiveAgent = useCallback(() => {
@@ -1388,6 +1430,19 @@ export function AgentsSubChatsSidebar({
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation()
+                                              handleForkSubChat(subChat.id)
+                                            }}
+                                            tabIndex={-1}
+                                            className="flex-shrink-0 text-muted-foreground hover:text-foreground active:text-foreground transition-[opacity,transform,color] duration-150 ease-out opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto active:scale-[0.97]"
+                                            aria-label="Fork agent"
+                                          >
+                                            <BranchIcon className="h-3.5 w-3.5" />
+                                          </button>
+                                        )}
+                                        {!isMultiSelectMode && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
                                               handleArchiveSubChat(subChat.id)
                                             }}
                                             tabIndex={-1}
@@ -1465,6 +1520,7 @@ export function AgentsSubChatsSidebar({
                                   isPinned={isPinned}
                                   onTogglePin={togglePinSubChat}
                                   onRename={handleRenameClick}
+                                  onFork={handleForkSubChat}
                                   onArchive={handleArchiveSubChat}
                                   onArchiveAllBelow={handleArchiveAllBelow}
                                   onArchiveOthers={onCloseOtherChats}
@@ -1661,6 +1717,19 @@ export function AgentsSubChatsSidebar({
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation()
+                                              handleForkSubChat(subChat.id)
+                                            }}
+                                            tabIndex={-1}
+                                            className="flex-shrink-0 text-muted-foreground hover:text-foreground active:text-foreground transition-[opacity,transform,color] duration-150 ease-out opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto active:scale-[0.97]"
+                                            aria-label="Fork agent"
+                                          >
+                                            <BranchIcon className="h-3.5 w-3.5" />
+                                          </button>
+                                        )}
+                                        {!isMultiSelectMode && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
                                               handleArchiveSubChat(subChat.id)
                                             }}
                                             tabIndex={-1}
@@ -1738,6 +1807,7 @@ export function AgentsSubChatsSidebar({
                                   isPinned={isPinned}
                                   onTogglePin={togglePinSubChat}
                                   onRename={handleRenameClick}
+                                  onFork={handleForkSubChat}
                                   onArchive={handleArchiveSubChat}
                                   onArchiveAllBelow={handleArchiveAllBelow}
                                   onArchiveOthers={onCloseOtherChats}

@@ -653,6 +653,47 @@ export const chatsRouter = router({
     }),
 
   /**
+   * Fork an existing sub-chat (creates an independent copy with same message history)
+   */
+  forkSubChat: publicProcedure
+    .input(
+      z.object({
+        subChatId: z.string(),
+        name: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDatabase()
+
+      // Get source sub-chat
+      const sourceSubChat = db
+        .select()
+        .from(subChats)
+        .where(eq(subChats.id, input.subChatId))
+        .get()
+
+      if (!sourceSubChat) {
+        throw new Error("SubChat not found")
+      }
+
+      // Create forked sub-chat with copied messages
+      const forkedSubChat = db
+        .insert(subChats)
+        .values({
+          chatId: sourceSubChat.chatId,
+          name: input.name || `${sourceSubChat.name || "Chat"} (fork)`,
+          mode: sourceSubChat.mode,
+          messages: sourceSubChat.messages, // Copy message history
+          sessionId: null, // New independent session
+          streamId: null,
+        })
+        .returning()
+        .get()
+
+      return forkedSubChat
+    }),
+
+  /**
    * Update sub-chat messages
    */
   updateSubChatMessages: publicProcedure

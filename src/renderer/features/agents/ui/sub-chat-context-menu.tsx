@@ -24,6 +24,7 @@ interface SubChatContextMenuProps {
   isPinned: boolean
   onTogglePin: (subChatId: string) => void
   onRename: (subChat: SubChatMeta) => void
+  onFork?: (subChatId: string) => void
   onArchive: (subChatId: string) => void
   onArchiveOthers: (subChatId: string) => void
   onArchiveAllBelow?: (subChatId: string) => void
@@ -44,6 +45,7 @@ export function SubChatContextMenu({
   isPinned,
   onTogglePin,
   onRename,
+  onFork,
   onArchive,
   onArchiveOthers,
   onArchiveAllBelow,
@@ -68,6 +70,11 @@ export function SubChatContextMenu({
       <ContextMenuItem onClick={() => onRename(subChat)}>
         Rename chat
       </ContextMenuItem>
+      {onFork && (
+        <ContextMenuItem onClick={() => onFork(subChat.id)}>
+          Fork chat
+        </ContextMenuItem>
+      )}
       <ContextMenuSeparator />
 
       {showCloseTabOptions ? (
