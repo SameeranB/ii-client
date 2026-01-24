@@ -66,9 +66,10 @@ async function buildFileTree(
   })
 }
 
-export const workspaceFilesRouter = router({
+export const fileCrudRouter = router({
   /**
-   * List all files in workspace directory
+   * List workspace files for UI tree display
+   * Scoped to .ii/workspaces/{chatId}/
    */
   listFiles: publicProcedure
     .input(z.object({ chatId: z.string() }))
@@ -116,7 +117,8 @@ export const workspaceFilesRouter = router({
     }),
 
   /**
-   * Read file contents from workspace directory
+   * @deprecated Use readProjectFile instead
+   * Legacy endpoint - reads workspace files only
    */
   readFile: publicProcedure
     .input(
@@ -171,6 +173,61 @@ export const workspaceFilesRouter = router({
         }
       } catch (error) {
         console.error("[workspaceFiles.readFile] error:", error)
+        throw new Error("Failed to read file")
+      }
+    }),
+
+  /**
+   * Read any file from project root (including workspace files)
+   * Accepts project-relative paths
+   */
+  readProjectFile: publicProcedure
+    .input(
+      z.object({
+        chatId: z.string(),
+        filePath: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = getDatabase()
+
+      // Get chat and project
+      const chat = db.select().from(chats).where(eq(chats.id, input.chatId)).get()
+      if (!chat) {
+        throw new Error("Chat not found")
+      }
+
+      const project = db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, chat.projectId))
+        .get()
+      if (!project) {
+        throw new Error("Project not found")
+      }
+
+      // Normalize and validate path
+      const normalizedPath = path.normalize(input.filePath)
+
+      // Build full file path from project root
+      const fullPath = path.join(project.path, normalizedPath)
+
+      // Security: Ensure resolved path is still within project directory
+      const resolvedPath = path.resolve(fullPath)
+      const resolvedProjectPath = path.resolve(project.path)
+      if (!resolvedPath.startsWith(resolvedProjectPath)) {
+        throw new Error("Access denied: path outside project directory")
+      }
+
+      // Read file
+      try {
+        const content = await fs.readFile(fullPath, "utf-8")
+        return {
+          content,
+          path: normalizedPath,
+        }
+      } catch (error) {
+        console.error("[workspaceFiles.readProjectFile] error:", error)
         throw new Error("Failed to read file")
       }
     }),
