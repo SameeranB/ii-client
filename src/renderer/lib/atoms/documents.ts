@@ -17,7 +17,7 @@ export interface FileTreeNode {
 export interface ActiveDocument {
   path: string
   content: string
-  type: "markdown" | "code" | "text" | "todos"
+  type: "markdown" | "code" | "text" | "todos" | "plan"
 }
 
 // ============================================
@@ -69,7 +69,7 @@ export const workspaceFileTreeHeightAtom = atomWithStorage(
  */
 export const workspaceFileTreeCollapsedAtom = atomWithStorage(
   "workspace-file-tree-collapsed",
-  false,
+  true,
   undefined,
   { getOnInit: true }
 )
@@ -79,7 +79,7 @@ export const workspaceFileTreeCollapsedAtom = atomWithStorage(
  */
 export const savedChatStatesCollapsedAtom = atomWithStorage(
   "saved-chat-states-collapsed",
-  false,
+  true,
   undefined,
   { getOnInit: true }
 )
@@ -89,7 +89,7 @@ export const savedChatStatesCollapsedAtom = atomWithStorage(
  */
 export const agentsSectionCollapsedAtom = atomWithStorage(
   "agents-section-collapsed",
-  false,
+  true,
   undefined,
   { getOnInit: true }
 )
@@ -99,7 +99,7 @@ export const agentsSectionCollapsedAtom = atomWithStorage(
  */
 export const skillsSectionCollapsedAtom = atomWithStorage(
   "skills-section-collapsed",
-  false,
+  true,
   undefined,
   { getOnInit: true }
 )
@@ -109,7 +109,7 @@ export const skillsSectionCollapsedAtom = atomWithStorage(
  */
 export const commandsSectionCollapsedAtom = atomWithStorage(
   "commands-section-collapsed",
-  false,
+  true,
   undefined,
   { getOnInit: true }
 )

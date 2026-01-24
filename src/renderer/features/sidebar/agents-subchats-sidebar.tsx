@@ -95,7 +95,7 @@ import { SavedChatStates } from "./components/saved-chat-states"
 import { AgentsSection } from "./components/agents-section"
 import { SkillsSection } from "./components/skills-section"
 import { CommandsSection } from "./components/commands-section"
-import { emitInsertText, emitForkSubChat } from "../agents/lib/drafts"
+import { emitInsertText, emitForkSubChat, emitRestoreChatState } from "../agents/lib/drafts"
 
 // Isolated Search History Popover for sidebar - prevents parent re-renders when popover opens/closes
 interface SidebarSearchHistoryPopoverProps {
@@ -253,8 +253,8 @@ export function AgentsSubChatsSidebar({
   // Get trpc utils for cache management
   const trpcUtils = trpc.useUtils()
 
-  // Save chat state mutation (uses old forkSubChat with isSavedChatState flag)
-  const saveChatStateMutation = trpc.chats.forkSubChat.useMutation({
+  // Save chat state mutation (uses dedicated saveChatState procedure)
+  const saveChatStateMutation = trpc.chats.saveChatState.useMutation({
     onSuccess: (savedState) => {
       // Invalidate saved chat states query to refresh the list
       if (parentChatId) {
@@ -603,7 +603,6 @@ export function AgentsSubChatsSidebar({
       saveChatStateMutation.mutate({
         subChatId,
         name: `${baseName} (saved)`,
-        isSavedChatState: true,
       })
     },
     [allSubChats, saveChatStateMutation],
@@ -611,10 +610,10 @@ export function AgentsSubChatsSidebar({
 
   const handleForkSavedState = useCallback(
     (savedStateId: string) => {
-      // Fork the saved state to create a new active chat using the new two-step approach
-      handleForkSubChat(savedStateId)
+      // Emit restore event to create a new active chat from saved state
+      emitRestoreChatState({ savedStateId })
     },
-    [handleForkSubChat],
+    [],
   )
 
   // Agents section handlers

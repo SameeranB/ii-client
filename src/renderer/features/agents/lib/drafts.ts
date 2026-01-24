@@ -105,6 +105,18 @@ export function emitForkSubChat(payload: ForkSubChatPayload): void {
   window.dispatchEvent(new CustomEvent(FORK_SUBCHAT_EVENT, { detail: payload }))
 }
 
+// Restore chat state event for creating new chat from saved state
+export const RESTORE_CHAT_STATE_EVENT = "ii:restore-chat-state"
+
+export interface RestoreChatStatePayload {
+  savedStateId: string
+}
+
+export function emitRestoreChatState(payload: RestoreChatStatePayload): void {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent(RESTORE_CHAT_STATE_EVENT, { detail: payload }))
+}
+
 // Load all drafts from localStorage
 export function loadGlobalDrafts(): GlobalDraftsRaw {
   if (typeof window === "undefined") return {}

@@ -904,6 +904,145 @@ export const chatsRouter = router({
     }),
 
   /**
+   * Save current chat state for later restoration
+   * Creates a bookmark of the chat that can be restored later
+   */
+  saveChatState: publicProcedure
+    .input(
+      z.object({
+        subChatId: z.string(),
+        name: z.string(),
+        tokenBudget: z.number().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db = getDatabase()
+
+      // Get the source sub-chat
+      const sourceSubChat = db
+        .select()
+        .from(subChats)
+        .where(eq(subChats.id, input.subChatId))
+        .get()
+
+      if (!sourceSubChat) {
+        throw new Error("Source chat not found")
+      }
+
+      // Parse messages
+      const messages = JSON.parse(sourceSubChat.messages || "[]")
+
+      // Apply token budget filtering if provided
+      const selectedMessages = input.tokenBudget
+        ? selectMessagesWithinTokenBudget(messages, input.tokenBudget)
+        : messages
+
+      console.log(
+        `[chats] Saving chat state: ${selectedMessages.length} messages${
+          input.tokenBudget
+            ? ` (filtered from ${messages.length} with budget ${input.tokenBudget})`
+            : ""
+        }`,
+      )
+
+      // Strip SDK metadata to prevent session conflicts
+      const cleanedMessages = stripSdkMetadata(
+        JSON.stringify(selectedMessages),
+      )
+
+      // Create the saved chat state
+      const savedState = db
+        .insert(subChats)
+        .values({
+          id: generateId(),
+          chatId: sourceSubChat.chatId,
+          name: input.name,
+          mode: sourceSubChat.mode,
+          sessionId: null, // No session ID for saved states
+          messages: cleanedMessages,
+          isSavedChatState: true, // Mark as saved state
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning()
+        .get()
+
+      return savedState
+    }),
+
+  /**
+   * Restore a saved chat state by creating a new sub-chat
+   * Uses the fork workflow to create a new session with replayed messages
+   */
+  restoreChatState: publicProcedure
+    .input(
+      z.object({
+        savedStateId: z.string(),
+        chatId: z.string(),
+        name: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db = getDatabase()
+
+      // Get the saved chat state
+      const savedState = db
+        .select()
+        .from(subChats)
+        .where(eq(subChats.id, input.savedStateId))
+        .get()
+
+      if (!savedState) {
+        throw new Error("Saved chat state not found")
+      }
+
+      if (!savedState.isSavedChatState) {
+        throw new Error("Can only restore from saved chat states")
+      }
+
+      // Step 1: Create empty sub-chat
+      const newSubChat = db
+        .insert(subChats)
+        .values({
+          id: generateId(),
+          chatId: input.chatId,
+          name:
+            input.name || `${savedState.name} (restored ${new Date().toLocaleDateString()})`,
+          mode: savedState.mode,
+          sessionId: null, // No session ID - will be created on first message
+          messages: "[]", // Start empty
+          isSavedChatState: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning()
+        .get()
+
+      // Step 2: Copy messages from saved state
+      const messages = JSON.parse(savedState.messages || "[]")
+
+      console.log(
+        `[chats] Restoring chat state: ${messages.length} messages to new sub-chat ${newSubChat.id}`,
+      )
+
+      // Update the new sub-chat with messages
+      const updatedSubChat = db
+        .update(subChats)
+        .set({
+          messages: JSON.stringify(messages),
+          updatedAt: new Date(),
+        })
+        .where(eq(subChats.id, newSubChat.id))
+        .returning()
+        .get()
+
+      return {
+        ...updatedSubChat,
+        messages, // Return parsed messages for frontend
+      }
+    }),
+
+  /**
    * Update sub-chat messages
    */
   updateSubChatMessages: publicProcedure

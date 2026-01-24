@@ -573,19 +573,13 @@ export const AgentEditTool = memo(function AgentEditTool({
 
           {/* Open in viewer button - show when not pending */}
           {!isPending && !isInputStreaming && fullPath && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleOpenInDocumentViewer}
-                  className="p-1 rounded-md hover:bg-accent transition-[background-color,transform] duration-150 ease-out active:scale-95"
-                >
-                  <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="px-2 py-1.5">
-                <span className="text-xs">Open in viewer</span>
-              </TooltipContent>
-            </Tooltip>
+            <button
+              onClick={handleOpenInDocumentViewer}
+              className="p-1 rounded-md hover:bg-accent transition-[background-color,transform] duration-150 ease-out active:scale-95"
+              title="Open in viewer"
+            >
+              <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
           )}
 
           {/* Expand/Collapse button - show when has visible content and not streaming */}

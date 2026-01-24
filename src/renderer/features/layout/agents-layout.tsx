@@ -257,7 +257,7 @@ export function AgentsLayout() {
         onClose={() => setSettingsOpen(false)}
       />
       <ClaudeLoginModal />
-      <div className="flex flex-col w-full h-full relative overflow-hidden bg-background select-none">
+      <div className="flex flex-col w-full h-full relative overflow-hidden bg-background">
         {/* Windows Title Bar (only shown on Windows with frameless window) */}
         <WindowsTitleBar />
         <div className="flex flex-1 overflow-hidden">

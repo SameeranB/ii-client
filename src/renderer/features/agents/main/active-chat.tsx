@@ -5106,6 +5106,144 @@ Make sure to preserve all functionality from both branches when resolving confli
 
   // Handle forking a sub-chat with message copy
   // This creates the Chat instance explicitly to avoid race conditions
+  const handleRestoreChatState = useCallback(
+    async (savedStateId: string) => {
+      const store = useAgentSubChatStore.getState()
+      const subChatMode = isPlanMode ? "plan" : "agent"
+
+      try {
+        // Use the new restoreChatState procedure (combines create + copy in one call)
+        const restoredSubChat = await trpcClient.chats.restoreChatState.mutate({
+          savedStateId,
+          chatId,
+        })
+
+        const newId = restoredSubChat.id
+        const messages = restoredSubChat.messages // Already parsed by backend
+
+        // STEP 3: Optimistic cache update WITH messages
+        utils.agents.getAgentChat.setData({ chatId }, (old) => {
+          if (!old) return old
+          return {
+            ...old,
+            subChats: [
+              ...(old.subChats || []),
+              {
+                id: newId,
+                name: restoredSubChat.name,
+                mode: subChatMode,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                messages: JSON.stringify(messages),
+                stream_id: null,
+              },
+            ],
+          }
+        })
+
+        // STEP 4: Track for animation
+        setJustCreatedIds((prev) => new Set([...prev, newId]))
+
+        // STEP 5: Add to Zustand store
+        store.addToAllSubChats({
+          id: newId,
+          name: restoredSubChat.name,
+          created_at: new Date().toISOString(),
+          mode: subChatMode,
+        })
+
+        // STEP 6: Switch to restored chat
+        store.addToOpenSubChats(newId)
+        store.setActiveSubChat(newId)
+
+        // STEP 7: Create Chat instance WITH messages (explicit creation)
+        if (worktreePath) {
+          const projectPath = (agentChat as any)?.project?.path as string | undefined
+          const transport = new IPCChatTransport({
+            chatId,
+            subChatId: newId,
+            cwd: worktreePath,
+            projectPath,
+            mode: subChatMode,
+          })
+
+          const newChat = new Chat<any>({
+            id: newId,
+            messages, // ← Include restored messages immediately
+            transport,
+            onError: () => {
+              useStreamingStatusStore.getState().setStatus(newId, "ready")
+            },
+            onFinish: () => {
+              clearLoading(setLoadingSubChats, newId)
+              useStreamingStatusStore.getState().setStatus(newId, "ready")
+
+              const wasManuallyAborted = agentChatStore.wasManuallyAborted(newId)
+              agentChatStore.clearManuallyAborted(newId)
+
+              const currentActiveSubChatId =
+                useAgentSubChatStore.getState().activeSubChatId
+              const currentSelectedChatId = appStore.get(selectedAgentChatIdAtom)
+
+              const isViewingThisSubChat = currentActiveSubChatId === newId
+              const isViewingThisChat = currentSelectedChatId === chatId
+
+              if (!isViewingThisSubChat) {
+                setSubChatUnseenChanges((prev: Set<string>) => {
+                  const next = new Set(prev)
+                  next.add(newId)
+                  return next
+                })
+              }
+
+              if (!isViewingThisChat) {
+                setUnseenChanges((prev: Set<string>) => {
+                  const next = new Set(prev)
+                  next.add(chatId)
+                  return next
+                })
+
+                if (!wasManuallyAborted) {
+                  const isSoundEnabled = appStore.get(soundNotificationsEnabledAtom)
+                  if (isSoundEnabled) {
+                    try {
+                      const audio = new Audio("./sound.mp3")
+                      audio.volume = 1.0
+                      audio.play().catch(() => {})
+                    } catch {}
+                  }
+                  notifyAgentComplete(agentChat?.name || "Agent")
+                }
+              }
+
+              fetchDiffStatsRef.current()
+            },
+          })
+
+          agentChatStore.set(newId, newChat, chatId)
+          agentChatStore.setStreamId(newId, null)
+          forceUpdate({})
+        }
+
+        toast.success(`Restored to "${restoredSubChat.name}"`)
+      } catch (error) {
+        console.error("Failed to restore chat state:", error)
+        toast.error("Failed to restore chat state")
+      }
+    },
+    [
+      chatId,
+      worktreePath,
+      agentChat,
+      isPlanMode,
+      utils,
+      setJustCreatedIds,
+      setSubChatUnseenChanges,
+      setUnseenChanges,
+      notifyAgentComplete,
+    ]
+  )
+
   const handleForkSubChat = useCallback(
     async (sourceSubChatId: string) => {
       const store = useAgentSubChatStore.getState()
@@ -5297,6 +5435,18 @@ Make sure to preserve all functionality from both branches when resolving confli
     window.addEventListener("ii:fork-subchat", handleForkEvent)
     return () => window.removeEventListener("ii:fork-subchat", handleForkEvent)
   }, [handleForkSubChat])
+
+  // Listen for restore chat state events from sidebar
+  useEffect(() => {
+    const handleRestoreEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ savedStateId: string }>
+      const { savedStateId } = customEvent.detail
+      handleRestoreChatState(savedStateId)
+    }
+
+    window.addEventListener("ii:restore-chat-state", handleRestoreEvent)
+    return () => window.removeEventListener("ii:restore-chat-state", handleRestoreEvent)
+  }, [handleRestoreChatState])
 
   // Multi-select state for sub-chats (for Cmd+W bulk close)
   const selectedSubChatIds = useAtomValue(selectedSubChatIdsAtom)
