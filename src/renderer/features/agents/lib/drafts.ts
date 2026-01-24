@@ -79,6 +79,32 @@ export function emitDraftsChanged(): void {
   window.dispatchEvent(new CustomEvent(DRAFTS_CHANGE_EVENT))
 }
 
+// Insert text event for direct editor updates
+export const INSERT_TEXT_EVENT = "ii:insert-text"
+
+export interface InsertTextPayload {
+  subChatId: string
+  text: string
+  prepend: boolean
+}
+
+export function emitInsertText(payload: InsertTextPayload): void {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent(INSERT_TEXT_EVENT, { detail: payload }))
+}
+
+// Fork subchat event for direct Chat instance creation
+export const FORK_SUBCHAT_EVENT = "ii:fork-subchat"
+
+export interface ForkSubChatPayload {
+  sourceSubChatId: string
+}
+
+export function emitForkSubChat(payload: ForkSubChatPayload): void {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent(FORK_SUBCHAT_EVENT, { detail: payload }))
+}
+
 // Load all drafts from localStorage
 export function loadGlobalDrafts(): GlobalDraftsRaw {
   if (typeof window === "undefined") return {}

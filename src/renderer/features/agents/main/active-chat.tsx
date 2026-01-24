@@ -151,7 +151,7 @@ import {
 } from "../search"
 import { agentChatStore } from "../stores/agent-chat-store"
 import { EMPTY_QUEUE, useMessageQueueStore } from "../stores/message-queue-store"
-import { clearSubChatCaches, isRollingBackAtom, rollbackHandlerAtom, syncMessagesWithStatusAtom } from "../stores/message-store"
+import { clearSubChatCaches, isRollingBackAtom, messageTokenDataAtom, rollbackHandlerAtom, syncMessagesWithStatusAtom } from "../stores/message-store"
 import { useStreamingStatusStore } from "../stores/streaming-status-store"
 import {
   useAgentSubChatStore,
@@ -5104,6 +5104,163 @@ Make sure to preserve all functionality from both branches when resolving confli
     agentChat?.name,
   ])
 
+  // Handle forking a sub-chat with message copy
+  // This creates the Chat instance explicitly to avoid race conditions
+  const handleForkSubChat = useCallback(
+    async (sourceSubChatId: string) => {
+      const store = useAgentSubChatStore.getState()
+      const subChatMode = isPlanMode ? "plan" : "agent"
+
+      // Get source subchat metadata
+      const sourceSubChat = agentSubChats.find((sc) => sc.id === sourceSubChatId)
+      const baseName = sourceSubChat?.name || "Chat"
+
+      // Get current token usage from context indicator
+      const tokenData = appStore.get(messageTokenDataAtom)
+
+      try {
+        // STEP 1: Create empty subchat in DB first to get real ID
+        const newSubChat = await trpcClient.chats.createSubChat.mutate({
+          chatId,
+          name: `${baseName} (fork)`,
+          mode: subChatMode,
+        })
+        const newId = newSubChat.id
+
+        // STEP 2: Copy messages from source (backend updates DB)
+        const result = await trpcClient.chats.copyMessagesToFork.mutate({
+          sourceSubChatId,
+          targetSubChatId: newId,
+          tokenBudget: tokenData.totalTokens,
+        })
+
+        // Parse messages for Chat instance
+        const messages = JSON.parse(result.messages)
+
+        // STEP 3: Optimistic cache update WITH messages
+        utils.agents.getAgentChat.setData({ chatId }, (old) => {
+          if (!old) return old
+          return {
+            ...old,
+            subChats: [
+              ...(old.subChats || []),
+              {
+                id: newId,
+                name: newSubChat.name,
+                mode: subChatMode,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                messages: result.messages,
+                stream_id: null,
+              },
+            ],
+          }
+        })
+
+        // STEP 4: Track for animation
+        setJustCreatedIds((prev) => new Set([...prev, newId]))
+
+        // STEP 5: Add to Zustand store
+        store.addToAllSubChats({
+          id: newId,
+          name: newSubChat.name,
+          created_at: new Date().toISOString(),
+          mode: subChatMode,
+        })
+
+        // STEP 6: Switch to forked chat
+        store.addToOpenSubChats(newId)
+        store.setActiveSubChat(newId)
+
+        // STEP 7: Create Chat instance WITH messages (explicit creation)
+        if (worktreePath) {
+          const projectPath = (agentChat as any)?.project?.path as string | undefined
+          const transport = new IPCChatTransport({
+            chatId,
+            subChatId: newId,
+            cwd: worktreePath,
+            projectPath,
+            mode: subChatMode,
+          })
+
+          const newChat = new Chat<any>({
+            id: newId,
+            messages, // ← Include forked messages immediately
+            transport,
+            onError: () => {
+              useStreamingStatusStore.getState().setStatus(newId, "ready")
+            },
+            onFinish: () => {
+              clearLoading(setLoadingSubChats, newId)
+              useStreamingStatusStore.getState().setStatus(newId, "ready")
+
+              const wasManuallyAborted = agentChatStore.wasManuallyAborted(newId)
+              agentChatStore.clearManuallyAborted(newId)
+
+              const currentActiveSubChatId =
+                useAgentSubChatStore.getState().activeSubChatId
+              const currentSelectedChatId = appStore.get(selectedAgentChatIdAtom)
+
+              const isViewingThisSubChat = currentActiveSubChatId === newId
+              const isViewingThisChat = currentSelectedChatId === chatId
+
+              if (!isViewingThisSubChat) {
+                setSubChatUnseenChanges((prev: Set<string>) => {
+                  const next = new Set(prev)
+                  next.add(newId)
+                  return next
+                })
+              }
+
+              if (!isViewingThisChat) {
+                setUnseenChanges((prev: Set<string>) => {
+                  const next = new Set(prev)
+                  next.add(chatId)
+                  return next
+                })
+
+                if (!wasManuallyAborted) {
+                  const isSoundEnabled = appStore.get(soundNotificationsEnabledAtom)
+                  if (isSoundEnabled) {
+                    try {
+                      const audio = new Audio("./sound.mp3")
+                      audio.volume = 1.0
+                      audio.play().catch(() => {})
+                    } catch {}
+                  }
+                  notifyAgentComplete(agentChat?.name || "Agent")
+                }
+              }
+
+              fetchDiffStatsRef.current()
+            },
+          })
+
+          agentChatStore.set(newId, newChat, chatId)
+          agentChatStore.setStreamId(newId, null)
+          forceUpdate({})
+        }
+
+        toast.success(`Forked to "${newSubChat.name}"`)
+      } catch (error) {
+        console.error("Failed to fork subchat:", error)
+        toast.error("Failed to fork chat")
+      }
+    },
+    [
+      chatId,
+      agentSubChats,
+      worktreePath,
+      agentChat,
+      isPlanMode,
+      utils,
+      setJustCreatedIds,
+      setSubChatUnseenChanges,
+      setUnseenChanges,
+      notifyAgentComplete,
+    ]
+  )
+
   // Keyboard shortcut: New sub-chat
   // Web: Opt+Cmd+T (browser uses Cmd+T for new tab)
   // Desktop: Cmd+T
@@ -5128,6 +5285,18 @@ Make sure to preserve all functionality from both branches when resolving confli
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [handleCreateNewSubChat])
+
+  // Listen for fork subchat events from sidebar
+  useEffect(() => {
+    const handleForkEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ sourceSubChatId: string }>
+      const { sourceSubChatId } = customEvent.detail
+      handleForkSubChat(sourceSubChatId)
+    }
+
+    window.addEventListener("ii:fork-subchat", handleForkEvent)
+    return () => window.removeEventListener("ii:fork-subchat", handleForkEvent)
+  }, [handleForkSubChat])
 
   // Multi-select state for sub-chats (for Cmd+W bulk close)
   const selectedSubChatIds = useAtomValue(selectedSubChatIdsAtom)

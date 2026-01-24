@@ -34,11 +34,13 @@ import {
   useAgentSubChatStore,
   type SubChatMeta,
 } from "../agents/stores/sub-chat-store"
+import { messageTokenDataAtom } from "../agents/stores/message-store"
 import { useShallow } from "zustand/react/shallow"
 import {
   PlusIcon,
   ArchiveIcon,
   BranchIcon,
+  SaveIcon,
   IconDoubleChevronLeft,
   IconSpinner,
   LoadingDot,
@@ -87,8 +89,13 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { useSubChatDraftsCache, getSubChatDraftKey } from "../agents/lib/drafts"
 import { Checkbox } from "../../components/ui/checkbox"
 import { TypewriterText } from "../../components/ui/typewriter-text"
-import { workspaceFileTreeHeightAtom } from "../../lib/atoms"
+import { workspaceFileTreeHeightAtom, workspaceFileTreeCollapsedAtom, savedChatStatesCollapsedAtom, agentsSectionCollapsedAtom, skillsSectionCollapsedAtom, commandsSectionCollapsedAtom } from "../../lib/atoms"
 import { WorkspaceFileTree } from "../workspace-files"
+import { SavedChatStates } from "./components/saved-chat-states"
+import { AgentsSection } from "./components/agents-section"
+import { SkillsSection } from "./components/skills-section"
+import { CommandsSection } from "./components/commands-section"
+import { emitInsertText, emitForkSubChat } from "../agents/lib/drafts"
 
 // Isolated Search History Popover for sidebar - prevents parent re-renders when popover opens/closes
 interface SidebarSearchHistoryPopoverProps {
@@ -243,29 +250,22 @@ export function AgentsSubChatsSidebar({
   })
 
   // Fork sub-chat mutation
-  const forkSubChatMutation = trpc.chats.forkSubChat.useMutation({
-    onSuccess: (forkedSubChat) => {
-      // Add to store
-      useAgentSubChatStore.getState().addToAllSubChats({
-        id: forkedSubChat.id,
-        name: forkedSubChat.name || undefined,
-        created_at: forkedSubChat.createdAt.toISOString(),
-        updated_at: forkedSubChat.updatedAt.toISOString(),
-        mode: forkedSubChat.mode,
-      })
+  // Get trpc utils for cache management
+  const trpcUtils = trpc.useUtils()
 
-      // Open and switch to fork
-      useAgentSubChatStore.getState().addToOpenSubChats(forkedSubChat.id)
-      useAgentSubChatStore.getState().setActiveSubChat(forkedSubChat.id)
-
-      // Animation
-      setJustCreatedIds((prev) => new Set([...prev, forkedSubChat.id]))
-
-      // Toast
-      toast.success(`Forked to "${forkedSubChat.name}"`)
+  // Save chat state mutation (uses old forkSubChat with isSavedChatState flag)
+  const saveChatStateMutation = trpc.chats.forkSubChat.useMutation({
+    onSuccess: (savedState) => {
+      // Invalidate saved chat states query to refresh the list
+      if (parentChatId) {
+        trpcUtils.chats.listSavedChatStates.invalidate({ chatId: parentChatId })
+      }
+      // Don't add to regular chat list or open it
+      // Just show success toast
+      toast.success(`Saved chat state: "${savedState.name}"`)
     },
     onError: (error) => {
-      toast.error(`Failed to fork: ${error.message}`)
+      toast.error(`Failed to save chat state: ${error.message}`)
     },
   })
 
@@ -330,9 +330,42 @@ export function AgentsSubChatsSidebar({
 
   // File tree resize state
   const [fileTreeHeight, setFileTreeHeight] = useAtom(workspaceFileTreeHeightAtom)
+  const [fileTreeCollapsed, setFileTreeCollapsed] = useAtom(workspaceFileTreeCollapsedAtom)
   const [isResizingFileTree, setIsResizingFileTree] = useState(false)
   const fileTreeResizeStartYRef = useRef<number>(0)
   const fileTreeHeightStartRef = useRef<number>(0)
+
+  const toggleFileTreeCollapse = useCallback(() => {
+    setFileTreeCollapsed(prev => !prev)
+  }, [setFileTreeCollapsed])
+
+  // Saved chat states collapse state
+  const [savedChatStatesCollapsed, setSavedChatStatesCollapsed] = useAtom(savedChatStatesCollapsedAtom)
+
+  const toggleSavedChatStatesCollapse = useCallback(() => {
+    setSavedChatStatesCollapsed(prev => !prev)
+  }, [setSavedChatStatesCollapsed])
+
+  // Agents section collapse state
+  const [agentsSectionCollapsed, setAgentsSectionCollapsed] = useAtom(agentsSectionCollapsedAtom)
+
+  const toggleAgentsSectionCollapse = useCallback(() => {
+    setAgentsSectionCollapsed(prev => !prev)
+  }, [setAgentsSectionCollapsed])
+
+  // Skills section collapse state
+  const [skillsSectionCollapsed, setSkillsSectionCollapsed] = useAtom(skillsSectionCollapsedAtom)
+
+  const toggleSkillsSectionCollapse = useCallback(() => {
+    setSkillsSectionCollapsed(prev => !prev)
+  }, [setSkillsSectionCollapsed])
+
+  // Commands section collapse state
+  const [commandsSectionCollapsed, setCommandsSectionCollapsed] = useAtom(commandsSectionCollapsedAtom)
+
+  const toggleCommandsSectionCollapse = useCallback(() => {
+    setCommandsSectionCollapsed(prev => !prev)
+  }, [setCommandsSectionCollapsed])
 
   // Handle file tree resize
   const handleFileTreeResizeStart = useCallback((e: React.PointerEvent) => {
@@ -551,17 +584,153 @@ export function AgentsSubChatsSidebar({
     [openSubChats.length, allSubChats, parentChatId, setUndoStack],
   )
 
+  // Get current token usage from context indicator
+  const tokenData = useAtomValue(messageTokenDataAtom)
+
   const handleForkSubChat = useCallback(
+    (subChatId: string) => {
+      // Emit fork event - active-chat.tsx will handle the actual fork with Chat instance creation
+      emitForkSubChat({ sourceSubChatId: subChatId })
+    },
+    [],
+  )
+
+  const handleSaveChatState = useCallback(
     (subChatId: string) => {
       const subChat = allSubChats.find((sc) => sc.id === subChatId)
       const baseName = subChat?.name || "Chat"
 
-      forkSubChatMutation.mutate({
+      saveChatStateMutation.mutate({
         subChatId,
-        name: `${baseName} (fork)`,
+        name: `${baseName} (saved)`,
+        isSavedChatState: true,
       })
     },
-    [allSubChats, forkSubChatMutation],
+    [allSubChats, saveChatStateMutation],
+  )
+
+  const handleForkSavedState = useCallback(
+    (savedStateId: string) => {
+      // Fork the saved state to create a new active chat using the new two-step approach
+      handleForkSubChat(savedStateId)
+    },
+    [handleForkSubChat],
+  )
+
+  // Agents section handlers
+  const handleAgentClick = useCallback(
+    (agent: any) => {
+      if (activeSubChatId) {
+        emitInsertText({
+          subChatId: activeSubChatId,
+          text: agent.name,
+          prepend: true
+        })
+        toast.success(`Added "${agent.name}" to input`)
+      }
+    },
+    [activeSubChatId]
+  )
+
+  const deleteAgentMutation = trpc.agents.delete.useMutation({
+    onSuccess: () => {
+      trpcUtils.agents.listEnabled.invalidate()
+      toast.success("Agent deleted")
+    },
+    onError: (error: any) => {
+      toast.error(`Failed to delete: ${error.message}`)
+    },
+  })
+
+  const handleDeleteAgent = useCallback(
+    (e: React.MouseEvent, agent: any) => {
+      e.stopPropagation()
+      if (confirm(`Delete agent "${agent.name}"?`)) {
+        deleteAgentMutation.mutate({ name: agent.name, source: agent.source })
+      }
+    },
+    [deleteAgentMutation]
+  )
+
+  // Skills section handlers
+  const handleSkillClick = useCallback(
+    (skill: any) => {
+      if (activeSubChatId) {
+        emitInsertText({
+          subChatId: activeSubChatId,
+          text: skill.name,
+          prepend: true
+        })
+        toast.success(`Added "${skill.name}" to input`)
+      }
+    },
+    [activeSubChatId]
+  )
+
+  const deleteSkillMutation = trpc.skills.delete.useMutation({
+    onSuccess: () => {
+      trpcUtils.skills.listEnabled.invalidate()
+      toast.success("Skill deleted")
+    },
+    onError: (error: any) => {
+      toast.error(`Failed to delete: ${error.message}`)
+    },
+  })
+
+  const handleDeleteSkill = useCallback(
+    (e: React.MouseEvent, skill: any) => {
+      e.stopPropagation()
+      if (confirm(`Delete skill "${skill.name}"?`)) {
+        deleteSkillMutation.mutate({ name: skill.name, source: skill.source })
+      }
+    },
+    [deleteSkillMutation]
+  )
+
+  // Commands section handlers
+  const handleCommandClick = useCallback(
+    (command: any) => {
+      if (activeSubChatId) {
+        // Transform [param] format to <param> format
+        let commandText = `/${command.name} `
+
+        if (command.argumentHint) {
+          // Transform [param1] [param2] → <param1> <param2>
+          const hints = command.argumentHint
+            .replace(/\[/g, '<')
+            .replace(/\]/g, '>')
+          commandText = `/${command.name} ${hints}`
+        }
+
+        emitInsertText({
+          subChatId: activeSubChatId,
+          text: commandText,
+          prepend: true
+        })
+        toast.success(`Added "${commandText}" to input`)
+      }
+    },
+    [activeSubChatId]
+  )
+
+  const deleteCommandMutation = trpc.commands.delete.useMutation({
+    onSuccess: () => {
+      trpcUtils.commands.list.invalidate()
+      toast.success("Command deleted")
+    },
+    onError: (error: any) => {
+      toast.error(`Failed to delete: ${error.message}`)
+    },
+  })
+
+  const handleDeleteCommand = useCallback(
+    (e: React.MouseEvent, command: any) => {
+      e.stopPropagation()
+      if (confirm(`Delete command "${command.name}"?`)) {
+        deleteCommandMutation.mutate({ path: command.path, source: command.source })
+      }
+    },
+    [deleteCommandMutation]
   )
 
   const handleConfirmArchiveAgent = useCallback(() => {
@@ -759,8 +928,6 @@ export function AgentsSubChatsSidebar({
       state.addToOpenSubChats(subChat.id)
     }
     state.setActiveSubChat(subChat.id)
-
-    setIsHistoryOpen(false)
   }, [])
 
   // Sort sub-chats by most recent first for history
@@ -1213,9 +1380,8 @@ export function AgentsSubChatsSidebar({
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Scrollable Sub-Chats List */}
         <div
-          className="relative z-10 overflow-hidden"
+          className="relative z-10 overflow-hidden flex-1"
           style={{
-            height: `calc(100% - ${fileTreeHeight}px - 4px)`,
             // @ts-expect-error - WebKit-specific property
             WebkitAppRegion: "no-drag",
           }}
@@ -1430,6 +1596,19 @@ export function AgentsSubChatsSidebar({
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation()
+                                              handleSaveChatState(subChat.id)
+                                            }}
+                                            tabIndex={-1}
+                                            className="flex-shrink-0 text-muted-foreground hover:text-foreground active:text-foreground transition-[opacity,transform,color] duration-150 ease-out opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto active:scale-[0.97]"
+                                            aria-label="Save chat state"
+                                          >
+                                            <SaveIcon className="h-3.5 w-3.5" />
+                                          </button>
+                                        )}
+                                        {!isMultiSelectMode && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
                                               handleForkSubChat(subChat.id)
                                             }}
                                             tabIndex={-1}
@@ -1520,6 +1699,7 @@ export function AgentsSubChatsSidebar({
                                   isPinned={isPinned}
                                   onTogglePin={togglePinSubChat}
                                   onRename={handleRenameClick}
+                                  onSave={handleSaveChatState}
                                   onFork={handleForkSubChat}
                                   onArchive={handleArchiveSubChat}
                                   onArchiveAllBelow={handleArchiveAllBelow}
@@ -1717,6 +1897,19 @@ export function AgentsSubChatsSidebar({
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation()
+                                              handleSaveChatState(subChat.id)
+                                            }}
+                                            tabIndex={-1}
+                                            className="flex-shrink-0 text-muted-foreground hover:text-foreground active:text-foreground transition-[opacity,transform,color] duration-150 ease-out opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto active:scale-[0.97]"
+                                            aria-label="Save chat state"
+                                          >
+                                            <SaveIcon className="h-3.5 w-3.5" />
+                                          </button>
+                                        )}
+                                        {!isMultiSelectMode && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
                                               handleForkSubChat(subChat.id)
                                             }}
                                             tabIndex={-1}
@@ -1807,6 +2000,7 @@ export function AgentsSubChatsSidebar({
                                   isPinned={isPinned}
                                   onTogglePin={togglePinSubChat}
                                   onRename={handleRenameClick}
+                                  onSave={handleSaveChatState}
                                   onFork={handleForkSubChat}
                                   onArchive={handleArchiveSubChat}
                                   onArchiveAllBelow={handleArchiveAllBelow}
@@ -1839,25 +2033,114 @@ export function AgentsSubChatsSidebar({
         </div>
 
         {/* Horizontal resize handle */}
-        <div
-          className="h-1 bg-border cursor-row-resize hover:bg-foreground/20 flex-shrink-0 relative z-10"
-          onPointerDown={handleFileTreeResizeStart}
-          style={{
-            // @ts-expect-error - WebKit-specific property
-            WebkitAppRegion: "no-drag",
-          }}
-        />
+        {!fileTreeCollapsed && (
+          <div
+            className="h-1 bg-border cursor-row-resize hover:bg-foreground/20 flex-shrink-0 relative z-10"
+            onPointerDown={handleFileTreeResizeStart}
+            style={{
+              // @ts-expect-error - WebKit-specific property
+              WebkitAppRegion: "no-drag",
+            }}
+          />
+        )}
 
         {/* File Tree */}
         <div
-          className="overflow-hidden relative z-10"
+          className={cn(
+            "overflow-hidden relative z-10 transition-all duration-200",
+            fileTreeCollapsed ? "h-auto" : ""
+          )}
           style={{
-            height: `${fileTreeHeight}px`,
+            height: fileTreeCollapsed ? "auto" : `${fileTreeHeight}px`,
             // @ts-expect-error - WebKit-specific property
             WebkitAppRegion: "no-drag",
           }}
         >
-          {parentChatId && <WorkspaceFileTree chatId={parentChatId} />}
+          {parentChatId && (
+            <WorkspaceFileTree
+              chatId={parentChatId}
+              isCollapsed={fileTreeCollapsed}
+              onToggleCollapse={toggleFileTreeCollapse}
+            />
+          )}
+        </div>
+
+        {/* Saved Chat States */}
+        <div
+          className="relative z-10"
+          style={{
+            // @ts-expect-error - WebKit-specific property
+            WebkitAppRegion: "no-drag",
+          }}
+        >
+          {parentChatId && (
+            <SavedChatStates
+              chatId={parentChatId}
+              isCollapsed={savedChatStatesCollapsed}
+              onToggleCollapse={toggleSavedChatStatesCollapse}
+              onForkSavedState={handleForkSavedState}
+            />
+          )}
+        </div>
+
+        {/* Agents Section */}
+        <div
+          className="relative z-10"
+          style={{
+            // @ts-expect-error - WebKit-specific property
+            WebkitAppRegion: "no-drag",
+          }}
+        >
+          {parentChatId && (
+            <AgentsSection
+              chatId={parentChatId}
+              projectPath={undefined}
+              isCollapsed={agentsSectionCollapsed}
+              onToggleCollapse={toggleAgentsSectionCollapse}
+              onAgentClick={handleAgentClick}
+              onDeleteAgent={handleDeleteAgent}
+            />
+          )}
+        </div>
+
+        {/* Skills Section */}
+        <div
+          className="relative z-10"
+          style={{
+            // @ts-expect-error - WebKit-specific property
+            WebkitAppRegion: "no-drag",
+          }}
+        >
+          {parentChatId && (
+            <SkillsSection
+              chatId={parentChatId}
+              projectPath={undefined}
+              isCollapsed={skillsSectionCollapsed}
+              onToggleCollapse={toggleSkillsSectionCollapse}
+              onSkillClick={handleSkillClick}
+              onDeleteSkill={handleDeleteSkill}
+            />
+          )}
+        </div>
+
+        {/* Commands Section */}
+        <div
+          className="relative z-10"
+          style={{
+            // @ts-expect-error - WebKit-specific property
+            WebkitAppRegion: "no-drag",
+          }}
+        >
+          {parentChatId && (
+            <CommandsSection
+              chatId={parentChatId}
+              projectPath={undefined}
+              isCollapsed={commandsSectionCollapsed}
+              onToggleCollapse={toggleCommandsSectionCollapse}
+              onCommandClick={handleCommandClick}
+              onDeleteCommand={handleDeleteCommand}
+            />
+          )}
         </div>
       </div>
 
